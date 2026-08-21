@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 # 🤖 CHAT_HISTORY_LOG: Store all messages for bot review
 CHAT_HISTORY_FILE = "/tmp/colab_chat_history.jsonl"
 
-def log_message(sender: str, content: str):
-    """Log chat message with timestamp for bot analysis"""
+def log_message(sender: str, content: str, event_type: str = "message"):
+    """🤖 CHAT_HISTORY_LOG: Log all messages and AFK events"""
     entry = {
         "timestamp": datetime.now().isoformat(),
         "sender": sender,
-        "content": content
+        "content": content,
+        "type": event_type
     }
     try:
         with open(CHAT_HISTORY_FILE, "a") as f:
@@ -411,11 +412,51 @@ async def get_history_text():
                         timestamp = msg.get("timestamp", "N/A")
                         sender = msg.get("sender", "?").upper()
                         content = msg.get("content", "")
-                        text += f"[{timestamp}] {sender}: {content}\n"
+                        event_type = msg.get("type", "message")
+                        text += f"[{timestamp}] {sender} ({event_type}): {content}\n"
     except Exception as e:
         text += f"\nError reading history: {e}\n"
 
     return HTMLResponse(content=f"<pre>{text}</pre>")
+
+
+@app.post("/afk")
+async def mark_afk(status: str = "away"):
+    """
+    🤖 AFK_HANDLER: Log AFK/return handoff
+    POST /afk?status=away  → User going AFK
+    POST /afk?status=back  → User returning (BACK or A)
+    """
+    log_message("system", f"User marked as {status.upper()}", event_type="afk")
+    return {
+        "status": status,
+        "logged": True,
+        "message": f"AFK {status} logged at {datetime.now().isoformat()}"
+    }
+
+
+@app.get("/afk/status")
+async def get_afk_status():
+    """🤖 AFK_HANDLER: Check last known AFK status"""
+    afk_events = []
+    try:
+        if os.path.exists(CHAT_HISTORY_FILE):
+            with open(CHAT_HISTORY_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        msg = json.loads(line)
+                        if msg.get("type") == "afk":
+                            afk_events.append(msg)
+    except Exception as e:
+        logger.error(f"Error reading AFK status: {e}")
+
+    last_event = afk_events[-1] if afk_events else None
+    return {
+        "last_event": last_event,
+        "total_afk_events": len(afk_events),
+        "current_timestamp": datetime.now().isoformat()
+    }
 
 
 @app.websocket("/ws/chat")
