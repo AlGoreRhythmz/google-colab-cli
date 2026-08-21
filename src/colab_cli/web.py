@@ -16,8 +16,26 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
+from datetime import datetime
+import os
 
 logger = logging.getLogger(__name__)
+
+# 🤖 CHAT_HISTORY_LOG: Store all messages for bot review
+CHAT_HISTORY_FILE = "/tmp/colab_chat_history.jsonl"
+
+def log_message(sender: str, content: str):
+    """Log chat message with timestamp for bot analysis"""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "sender": sender,
+        "content": content
+    }
+    try:
+        with open(CHAT_HISTORY_FILE, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        logger.error(f"Failed to log message: {e}")
 
 # 🤖 PHONE_CHAT_INTERFACE: The main chat HTML page
 PHONE_CHAT_HTML = """
@@ -351,13 +369,64 @@ async def root():
     )
 
 
+@app.get("/history")
+async def get_history():
+    """
+    🤖 CHAT_HISTORY_LOG: View all past messages and bot activity
+    Returns JSON log of all conversations with timestamps
+    """
+    messages = []
+    try:
+        if os.path.exists(CHAT_HISTORY_FILE):
+            with open(CHAT_HISTORY_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        messages.append(json.loads(line))
+    except Exception as e:
+        logger.error(f"Error reading history: {e}")
+
+    return {
+        "total_messages": len(messages),
+        "messages": messages,
+        "file": CHAT_HISTORY_FILE
+    }
+
+
+@app.get("/history.txt")
+async def get_history_text():
+    """
+    🤖 CHAT_HISTORY_LOG: View history as plain text
+    """
+    messages = []
+    text = "=== COLAB CHAT HISTORY ===\n\n"
+
+    try:
+        if os.path.exists(CHAT_HISTORY_FILE):
+            with open(CHAT_HISTORY_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        msg = json.loads(line)
+                        timestamp = msg.get("timestamp", "N/A")
+                        sender = msg.get("sender", "?").upper()
+                        content = msg.get("content", "")
+                        text += f"[{timestamp}] {sender}: {content}\n"
+    except Exception as e:
+        text += f"\nError reading history: {e}\n"
+
+    return HTMLResponse(content=f"<pre>{text}</pre>")
+
+
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    🤖 WEBSOCKET_HANDLER: Real-time message handling.
-    Accepts WebSocket connections and echoes messages back.
+    🤖 WEBSOCKET_HANDLER: Real-time message handling with logging.
+    Accepts WebSocket connections, logs all messages, echoes back.
     """
     await websocket.accept()
+    log_message("system", "Client connected")
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -367,18 +436,27 @@ async def websocket_endpoint(websocket: WebSocket):
                 content = message.get("content", "")
                 logger.info(f"Received message: {content}")
 
+                # 🤖 CHAT_HISTORY_LOG: Log user message
+                log_message("user", content)
+
                 # Echo the message back as assistant response
                 response = {
                     "type": "message",
                     "content": f"You said: {content}",
                     "sender": "assistant"
                 }
+
+                # 🤖 CHAT_HISTORY_LOG: Log bot response
+                log_message("bot", response["content"])
+
                 await websocket.send_json(response)
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
+        log_message("system", "Client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+        log_message("system", f"Error: {e}")
         try:
             await websocket.send_json({
                 "type": "error",
