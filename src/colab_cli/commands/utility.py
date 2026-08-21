@@ -421,12 +421,52 @@ def skill():
     _print_resource("SKILL.md")
 
 
+def chat(
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port to run the chat server on (default: 8000)",
+        ),
+    ] = 8000,
+    host: Annotated[
+        str,
+        typer.Option(
+            "--host",
+            "-h",
+            help="Host to bind to (default: 127.0.0.1)",
+        ),
+    ] = "127.0.0.1",
+):
+    """
+    🤖 TEMP_ADDRESS_ROUTE: Start the phone chat interface server
+
+    Opens a working phone-style chat interface at http://{host}:{port}/chat
+
+    This is a temporary debugging/testing interface with WebSocket support.
+    Press Ctrl+C to stop the server.
+
+    Example:
+        colab chat --port 8000 --host 127.0.0.1
+    """
+    from colab_cli.web import run_server
+
+    typer.echo(f"[colab] Starting phone chat server at http://{host}:{port}/chat")
+    typer.echo("[colab] Press Ctrl+C to stop the server")
+    try:
+        run_server(host=host, port=port)
+    except KeyboardInterrupt:
+        typer.echo("\n[colab] Chat server stopped.")
+
+
 def register(app: typer.Typer):
     app.command()(pay)
     app.command()(log)
     app.command(name="url")(url)
     app.command(name="version")(version_command)
     app.command(name="update")(update_command)
+    app.command(name="chat")(chat)
     # Developer-only debugging aid; hidden from `colab --help` but still
     # reachable via `colab whoami` / `colab whoami --help`.
     app.command(name="whoami", hidden=True)(whoami)
